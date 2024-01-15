@@ -1,0 +1,99 @@
+version: "0.0.0"
+
+services:
+  jobmanager:
+    container_name: jobmanager
+    build:
+      context: ./container/flink/
+    ports:
+      - "8081:8081"
+      - "9249:9249"
+    command: jobmanager
+    volumes:
+      - ./code:/opt/flink/code
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager        
+
+  taskmanager:
+    container_name: taskmanager
+    build:
+      context: ./container/flink/
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    ports:
+      - "9250:9249"
+    volumes:
+      - ./code:/opt/flink/code
+    scale: 1
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2        
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.5.0
+    container_name: zookeeper
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+
+  kafka:
+    image: confluentinc/cp-kafka:5.5.0
+    container_name: kafka
+    ports: 
+      - "9093:9093"
+    depends_on:
+      - zookeeper
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:9092,EXTERNAL://localhost:9093
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+
+  postgres:
+    image: debezium/postgres:15
+    container_name: postgres
+    hostname: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/initdb.sql:/docker-entrypoint-initdb.d/init.sql
+
+  datagen:
+    build:
+      context: ./container/data_generation/
+    volumes:
+      - ./gen_data:/opt/datagen
+    container_name: datagen
+    restart: on-failure
+    depends_on:
+      - postgres
+      - kafka
+    entrypoint:
+      - python
+      - gen_fake_data.py
